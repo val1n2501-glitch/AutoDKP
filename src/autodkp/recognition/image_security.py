@@ -3,11 +3,38 @@ from __future__ import annotations
 import io
 import warnings
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 
 
 class UnsafeImageError(ValueError):
     pass
+
+
+def assess_image_quality(raw: bytes) -> tuple[str, ...]:
+    """Return conservative, user-facing warnings without rejecting the image."""
+    with Image.open(io.BytesIO(raw)) as source:
+        image = source.convert("RGB")
+        warnings_found: list[str] = []
+        if image.width < 900 or image.height < 650:
+            warnings_found.append("низкое разрешение")
+        preview = image.copy()
+        preview.thumbnail((640, 640))
+        gray = ImageOps.grayscale(preview)
+        brightness = ImageStat.Stat(gray).mean[0]
+        if brightness < 45:
+            warnings_found.append("фото слишком тёмное")
+        # FIND_EDGES also highlights the artificial outer image border.  Exclude
+        # that border so a blank/blurred photo is not mistaken for a sharp one.
+        edges = gray.filter(ImageFilter.FIND_EDGES)
+        if edges.width > 8 and edges.height > 8:
+            edges = edges.crop((3, 3, edges.width - 3, edges.height - 3))
+        if ImageStat.Stat(edges).var[0] < 90:
+            warnings_found.append("возможна сильная размытость")
+        histogram = gray.histogram()
+        glare_ratio = sum(histogram[248:]) / max(1, preview.width * preview.height)
+        if glare_ratio > 0.20:
+            warnings_found.append("много пересвеченных участков или бликов")
+        return tuple(warnings_found)
 
 
 def sanitize_image(raw: bytes, *, max_bytes: int, max_pixels: int) -> bytes:

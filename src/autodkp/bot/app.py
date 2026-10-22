@@ -32,7 +32,11 @@ from autodkp.pdf.renderer import PdfRenderer
 from autodkp.security.access import AllowlistMiddleware
 from autodkp.storage.session_store import InMemoryDealStore
 from autodkp.recognition.base import RecognitionProvider
-from autodkp.recognition.image_security import UnsafeImageError, sanitize_image
+from autodkp.recognition.image_security import (
+    UnsafeImageError,
+    assess_image_quality,
+    sanitize_image,
+)
 from autodkp.recognition.openai_provider import OpenAIRecognitionProvider
 
 
@@ -83,7 +87,7 @@ def _document_keyboard(
     confirmed = confirmed_documents or set()
 
     def label(marker: str, text: str) -> str:
-        return f"✅ {text}" if marker in confirmed else text
+        return f"✅ 🔄 Заменить {text}" if marker in confirmed else text
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -384,7 +388,7 @@ def _review_keyboard(deal_id: str, revision: int) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="Показать все данные",
+                    text="🔎 Проверить все данные",
                     callback_data=f"review-details:{deal_id}:{revision}",
                 )
             ],
@@ -392,6 +396,31 @@ def _review_keyboard(deal_id: str, revision: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="Изменить данные",
                     callback_data=f"review-edit:{deal_id}:{revision}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Завершить и удалить данные",
+                    callback_data=f"review-finish:{deal_id}:{revision}",
+                )
+            ],
+        ]
+    )
+
+
+def _after_pdf_keyboard(deal_id: str, revision: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Изменить данные",
+                    callback_data=f"review-edit:{deal_id}:{revision}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Начать новую сделку",
+                    callback_data=f"review-new:{deal_id}:{revision}",
                 )
             ],
             [
@@ -803,6 +832,48 @@ def build_dispatcher(
             reply_markup=_start_keyboard(),
         )
 
+    @router.message(Command("help"))
+    async def show_help(message: Message) -> None:
+        await message.answer(
+            "Как подготовить ДКП:\n\n"
+            "1. Нажмите «Заполнить по фото».\n"
+            "2. Загрузите ПТС, паспорт продавца и паспорт покупателя. "
+            "СТС можно добавить отдельно, если его данные не извлечены из ПТС.\n"
+            "3. Проверьте распознанные значения и исправьте поля с ⚠️.\n"
+            "4. Через «Дополнить вручную» внесите место и дату договора, "
+            "пробег и стоимость.\n"
+            "5. Проверьте все данные и сформируйте PDF.\n\n"
+            "Команды: /status — текущий прогресс, /cancel — удалить черновик, "
+            "/start — начать заново."
+        )
+
+    @router.message(Command("status"))
+    async def show_status(message: Message, deal_store: InMemoryDealStore) -> None:
+        if message.from_user is None:
+            return
+        session = deal_store.get(message.from_user.id)
+        if session is None:
+            await message.answer(
+                "Активной сделки нет. Начните через /start.",
+                reply_markup=_start_keyboard(),
+            )
+            return
+        if session.draft is not None:
+            await message.answer(
+                "✅ Все обязательные поля заполнены. PDF доступен.\n\n"
+                + _review_text(session.draft),
+                reply_markup=_review_keyboard(session.deal_id, session.revision),
+            )
+            return
+        await message.answer(
+            _deal_progress_text(session),
+            reply_markup=_document_keyboard(
+                session.deal_id,
+                session.revision,
+                session.confirmed_documents,
+            ),
+        )
+
     @router.callback_query(F.data == "deal:new")
     async def create_manual_deal(
         callback: CallbackQuery,
@@ -1029,6 +1100,9 @@ def build_dispatcher(
                     ),
                     timeout=15,
                 )
+                quality_warnings = await asyncio.to_thread(
+                    assess_image_quality, sanitized
+                )
             except UnsafeImageError as error:
                 await message.answer(str(error))
                 return
@@ -1080,6 +1154,13 @@ def build_dispatcher(
             replace_photo_index=None,
             replace_batch_version=None,
         )
+        if quality_warnings:
+            await message.answer(
+                "⚠️ Проверьте качество снимка: "
+                + "; ".join(quality_warnings)
+                + ". Фото сохранено, но лучше заменить его до распознавания, "
+                "если текст читается плохо."
+            )
         await render_upload_panel(
             message.from_user.id,
             state,
@@ -1375,6 +1456,62 @@ def build_dispatcher(
                 reply_markup=_document_keyboard(deal_id, revision),
             )
             return
+        passport_role = state_data.get("passport_role")
+        if expected_kind is DocumentKind.PASSPORT and passport_role in {
+            "seller",
+            "buyer",
+        }:
+            current_session = deal_store.get(callback.from_user.id)
+            other_role = "buyer" if passport_role == "seller" else "seller"
+            selected_series = "".join(
+                char
+                for char in accepted.get(f"{passport_role}.passport_series", "")
+                if char.isdigit()
+            )
+            selected_number = "".join(
+                char
+                for char in accepted.get(f"{passport_role}.passport_number", "")
+                if char.isdigit()
+            )
+            other_values = (
+                current_session.form.values
+                if current_session is not None and current_session.form is not None
+                else {}
+            )
+            other_series = "".join(
+                char
+                for char in str(
+                    other_values.get(f"{other_role}.passport_series", "")
+                )
+                if char.isdigit()
+            )
+            other_number = "".join(
+                char
+                for char in str(
+                    other_values.get(f"{other_role}.passport_number", "")
+                )
+                if char.isdigit()
+            )
+            if (
+                selected_series
+                and selected_number
+                and selected_series == other_series
+                and selected_number == other_number
+            ):
+                selected_name = "продавца" if passport_role == "seller" else "покупателя"
+                other_name = "покупателя" if passport_role == "seller" else "продавца"
+                await state.set_state(PhotoDealStates.choosing_document)
+                await callback.message.edit_text(
+                    f"⚠️ Этот паспорт уже сохранён как паспорт {other_name}. "
+                    f"Похоже, при загрузке паспорта {selected_name} выбран не тот человек. "
+                    "Выберите правильный документ и загрузите его заново.",
+                    reply_markup=_document_keyboard(
+                        deal_id,
+                        revision,
+                        current_session.confirmed_documents if current_session else set(),
+                    ),
+                )
+                return
         logger.info(
             "OCR accepted fields kind=%s role=%s keys=%s uncertain=%s skipped_keys=%s",
             expected_kind.value,
@@ -2125,6 +2262,10 @@ def build_dispatcher(
             return
         await callback.answer()
         if isinstance(callback.message, Message):
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except TelegramBadRequest:
+                pass
             await callback.message.answer(
                 "Выберите раздел, который хотите исправить.",
                 reply_markup=_section_keyboard(deal_id, session.revision),
@@ -2154,6 +2295,10 @@ def build_dispatcher(
             await callback.answer("Сообщение больше недоступно", show_alert=True)
             return
         await callback.answer()
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
         await callback.message.answer(
             "Ниже показаны полные персональные данные для проверки. "
             "Эти сообщения могут сохраняться в Telegram."
@@ -2310,13 +2455,17 @@ def build_dispatcher(
                         or current.revision != revision
                     ):
                         return
+                    try:
+                        await callback.message.edit_reply_markup(reply_markup=None)
+                    except TelegramBadRequest:
+                        pass
                     await callback.message.answer_document(
                         FSInputFile(output),
                         caption=(
                             "Договор сформирован. Проверьте его перед печатью. "
                             "После проверки можно исправить данные или завершить сделку."
                         ),
-                        reply_markup=_review_keyboard(deal_id, revision),
+                        reply_markup=_after_pdf_keyboard(deal_id, revision),
                     )
         except FieldOverflowError as error:
             label = _PDF_FIELD_LABELS.get(error.field_name, error.field_name)
@@ -2334,6 +2483,39 @@ def build_dispatcher(
         finally:
             await deal_store.finish_generation(
                 callback.from_user.id, deal_id, revision
+            )
+
+    @router.callback_query(ManualDealStates.review, F.data.startswith("review-new:"))
+    async def start_new_deal_after_pdf(
+        callback: CallbackQuery,
+        state: FSMContext,
+        deal_store: InMemoryDealStore,
+    ) -> None:
+        parts = _callback_parts(callback.data, "review-new", 2)
+        if parts is None:
+            await callback.answer("Некорректная кнопка", show_alert=True)
+            return
+        deal_id, raw_revision = parts
+        try:
+            revision = int(raw_revision)
+        except ValueError:
+            await callback.answer("Некорректная кнопка", show_alert=True)
+            return
+        if not await deal_store.delete_if_current(
+            callback.from_user.id, deal_id, revision
+        ):
+            await callback.answer("Эта кнопка устарела", show_alert=True)
+            return
+        await state.clear()
+        await callback.answer("Предыдущая сделка удалена")
+        if isinstance(callback.message, Message):
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except TelegramBadRequest:
+                pass
+            await callback.message.answer(
+                "Начинаем новую сделку. Выберите способ заполнения.",
+                reply_markup=_start_keyboard(),
             )
 
     @router.callback_query(ManualDealStates.review, F.data.startswith("review-finish:"))

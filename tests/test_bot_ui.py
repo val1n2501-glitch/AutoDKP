@@ -17,6 +17,7 @@ from autodkp.bot.app import (
     _start_keyboard,
     _upload_keyboard,
     _upload_summary_text,
+    _after_pdf_keyboard,
     build_dispatcher,
 )
 from autodkp.config import Settings
@@ -48,9 +49,9 @@ def test_document_picker_marks_confirmed_documents_and_progress_explains_pdf() -
         {"paper_pts", "passport:seller", "passport:buyer"},
     )
     texts = [button.text for row in keyboard.inline_keyboard for button in row]
-    assert "✅ ПТС" in texts
-    assert "✅ Паспорт продавца" in texts
-    assert "✅ Паспорт покупателя" in texts
+    assert "✅ 🔄 Заменить ПТС" in texts
+    assert "✅ 🔄 Заменить Паспорт продавца" in texts
+    assert "✅ 🔄 Заменить Паспорт покупателя" in texts
     assert "СТС автомобиля" in texts
 
     store = InMemoryDealStore(timedelta(minutes=60))
@@ -69,6 +70,15 @@ def test_review_masks_passports() -> None:
     assert f"{deal.seller.passport_series} {deal.seller.passport_number}" not in text
     assert "••••78" in text
     assert "••••56" in text
+
+
+def test_pdf_result_offers_new_deal() -> None:
+    callbacks = [
+        button.callback_data
+        for row in _after_pdf_keyboard("abc123", 7).inline_keyboard
+        for button in row
+    ]
+    assert "review-new:abc123:7" in callbacks
 
 
 def test_edit_keyboards_use_short_callback_payloads() -> None:

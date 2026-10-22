@@ -6,7 +6,11 @@ from datetime import timedelta
 import pytest
 from PIL import Image
 
-from autodkp.recognition.image_security import UnsafeImageError, sanitize_image
+from autodkp.recognition.image_security import (
+    UnsafeImageError,
+    assess_image_quality,
+    sanitize_image,
+)
 from autodkp.recognition.openai_provider import _ALLOWED_FIELDS
 from autodkp.domain.models import DocumentKind
 from autodkp.domain.manual_entry import ManualEntryError
@@ -38,6 +42,12 @@ def test_sanitize_image_rejects_non_image_and_oversized_input() -> None:
         sanitize_image(b"not-an-image", max_bytes=100, max_pixels=1_000_000)
     with pytest.raises(UnsafeImageError, match="слишком большой"):
         sanitize_image(b"\xff\xd8\xff" + b"x" * 100, max_bytes=20, max_pixels=1_000_000)
+
+
+def test_quality_check_warns_about_small_blank_photo() -> None:
+    warnings_found = assess_image_quality(_jpeg_with_metadata())
+    assert "низкое разрешение" in warnings_found
+    assert "возможна сильная размытость" in warnings_found
 
 
 def test_paper_pts_can_supply_current_sts_details() -> None:
