@@ -1,0 +1,2 @@
+"""Ephemeral deal storage."""
+
