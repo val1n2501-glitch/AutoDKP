@@ -37,7 +37,10 @@ from autodkp.recognition.image_security import (
     assess_image_quality,
     sanitize_image,
 )
-from autodkp.recognition.openai_provider import OpenAIRecognitionProvider
+from autodkp.recognition.openai_provider import (
+    CRITICAL_OCR_FIELDS,
+    OpenAIRecognitionProvider,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -254,6 +257,11 @@ _DOCUMENT_TITLES = {
     DocumentKind.PAPER_PTS.value: "Бумажный ПТС",
     DocumentKind.PASSPORT.value: "Паспорт",
 }
+
+def _requires_mandatory_ocr_review(
+    key: str, confidence: float, warning: str | None
+) -> bool:
+    return key in CRITICAL_OCR_FIELDS and (confidence < 0.8 or bool(warning))
 
 
 def _specific_document_title(
@@ -1443,6 +1451,10 @@ def build_dispatcher(
             marker = "⚠️ " if item.confidence < 0.8 or item.warning else ""
             if marker:
                 uncertain_fields.add(key)
+                if _requires_mandatory_ocr_review(
+                    key, item.confidence, item.warning
+                ):
+                    required_corrections.add(key)
             suffix = " — проверьте внимательно" if marker else ""
             lines.append(
                 f"{marker}{spec.label}: {_text_preview(item.value)}{suffix}"

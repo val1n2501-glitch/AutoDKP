@@ -13,6 +13,7 @@ from autodkp.bot.app import (
     _manual_missing_sections_keyboard,
     _review_keyboard,
     _review_text,
+    _requires_mandatory_ocr_review,
     _section_keyboard,
     _start_keyboard,
     _upload_keyboard,
@@ -213,6 +214,13 @@ def test_photo_review_calls_action_change_data() -> None:
     )
     assert "⚠️ Номер двигателя: 30492167" in uncertain_text
     assert "распознаны неуверенно" in uncertain_text
+
+
+def test_uncertain_critical_ocr_fields_require_explicit_review() -> None:
+    assert _requires_mandatory_ocr_review("vehicle.make_model", 0.79, None)
+    assert _requires_mandatory_ocr_review("vehicle.vin", 0.99, "VIN conflicts")
+    assert not _requires_mandatory_ocr_review("vehicle.vin", 0.99, None)
+    assert not _requires_mandatory_ocr_review("vehicle.body_color", 0.40, None)
 
 
 def test_recognized_editor_lists_every_field_and_marks_uncertain_values() -> None:

@@ -2,18 +2,23 @@ from __future__ import annotations
 
 import io
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 
+from autodkp.domain.manual_entry import ManualEntryError
+from autodkp.domain.models import DocumentKind
 from autodkp.recognition.image_security import (
     UnsafeImageError,
     assess_image_quality,
     sanitize_image,
 )
-from autodkp.recognition.openai_provider import _ALLOWED_FIELDS
-from autodkp.domain.models import DocumentKind
-from autodkp.domain.manual_entry import ManualEntryError
+from autodkp.recognition.models import RecognizedDocument, RecognizedField
+from autodkp.recognition.openai_provider import (
+    _ALLOWED_FIELDS,
+    OpenAIRecognitionProvider,
+)
 from autodkp.storage.session_store import InMemoryDealStore
 
 
@@ -58,6 +63,71 @@ def test_paper_pts_can_supply_current_sts_details() -> None:
         "vehicle.sts.issued_by",
         "vehicle.sts.issue_date",
     } <= fields
+
+
+class _FakeResponses:
+    def __init__(self, outputs: list[RecognizedDocument]) -> None:
+        self.outputs = outputs
+        self.calls: list[dict] = []
+
+    async def parse(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(output_parsed=self.outputs.pop(0))
+
+
+@pytest.mark.asyncio
+async def test_paper_pts_uses_original_detail_and_rechecks_uncertain_critical_fields() -> None:
+    first = RecognizedDocument(
+        document_kind=DocumentKind.PAPER_PTS,
+        fields=[
+            RecognizedField(
+                key="vehicle.make_model",
+                value="LADA",
+                confidence=0.96,
+            ),
+            RecognizedField(
+                key="vehicle.vin", value="JMZGJ42683108161", confidence=0.96
+            ),
+        ],
+    )
+    second = RecognizedDocument(
+        document_kind=DocumentKind.PAPER_PTS,
+        fields=[
+            RecognizedField(
+                key="vehicle.make_model", value="MAZDA 6", confidence=0.98
+            )
+        ],
+    )
+    fake_responses = _FakeResponses([first, second])
+    provider = OpenAIRecognitionProvider("sk-test-key-long-enough", "gpt-5.5")
+    provider._client = SimpleNamespace(responses=fake_responses)
+
+    result = await provider.recognize(DocumentKind.PAPER_PTS, [b"image"])
+
+    assert len(fake_responses.calls) == 2
+    assert all(
+        call["input"][0]["content"][1]["detail"] == "original"
+        for call in fake_responses.calls
+    )
+    assert all(call["reasoning"] == {"effort": "medium"} for call in fake_responses.calls)
+    assert [
+        item.value for item in result.fields if item.key == "vehicle.make_model"
+    ] == ["LADA", "MAZDA 6"]
+
+
+def test_brand_vin_conflict_marks_every_candidate_as_uncertain() -> None:
+    document = RecognizedDocument(
+        document_kind=DocumentKind.PAPER_PTS,
+        fields=[
+            RecognizedField(key="vehicle.make_model", value="LADA", confidence=0.9),
+            RecognizedField(key="vehicle.make_model", value="LADA", confidence=0.95),
+            RecognizedField(
+                key="vehicle.vin", value="JMZGJ42683108161", confidence=0.99
+            ),
+        ],
+    )
+    OpenAIRecognitionProvider._flag_brand_vin_conflict(document)
+    assert all(item.warning for item in document.fields)
 
 
 @pytest.mark.asyncio

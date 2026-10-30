@@ -197,7 +197,9 @@ class InMemoryDealStore:
                 raise LookupError("Нет данных для подтверждения.")
             if session.pending_ocr_required_corrections:
                 raise ManualEntryError(
-                    "Сначала исправьте поля, где найдено несколько разных значений."
+                    "Сначала исправьте или подтвердите критичные поля "
+                    "со значком ⚠️: в них может быть найдено несколько разных "
+                    "значений."
                 )
             if session.form is None:
                 session.form = ManualDealForm()
