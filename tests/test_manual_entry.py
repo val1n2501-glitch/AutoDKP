@@ -5,6 +5,7 @@ import pytest
 from autodkp.domain.demo import make_demo_deal
 from autodkp.domain.manual_entry import (
     MANUAL_FIELDS,
+    REQUIRED_MANUAL_FIELDS,
     ManualDealForm,
     ManualEntryError,
 )
@@ -64,6 +65,18 @@ def test_full_manual_entry_builds_the_same_deal_as_demo() -> None:
 
     assert form.next_missing() is None
     assert form.build_deal() == make_demo_deal()
+
+
+def test_mileage_is_optional_but_is_validated_when_provided() -> None:
+    form = ManualDealForm()
+    answers = _answers_from_demo()
+    for field in REQUIRED_MANUAL_FIELDS:
+        form.submit(field.key, answers[field.key])
+
+    assert form.next_missing() is None
+    deal = form.build_deal()
+    assert deal.vehicle.mileage_km is None
+    assert "vehicle.mileage_km" not in form.values
 
 
 def test_next_missing_and_correction_do_not_lose_other_fields() -> None:

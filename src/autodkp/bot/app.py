@@ -23,7 +23,11 @@ from aiogram.types import (
 )
 
 from autodkp.config import Settings
-from autodkp.domain.manual_entry import MANUAL_FIELDS, ManualEntryError
+from autodkp.domain.manual_entry import (
+    MANUAL_FIELDS,
+    REQUIRED_MANUAL_FIELDS,
+    ManualEntryError,
+)
 from autodkp.domain.manual_entry import FIELD_BY_KEY
 from autodkp.domain.models import DealDraft, DocumentKind, Person
 from autodkp.pdf.errors import FieldOverflowError, PdfRenderError
@@ -63,8 +67,12 @@ _PDF_FIELD_LABELS = {
     "agreement_place": "Место составления",
     "buyer_details_line1": "Данные покупателя",
     "buyer_details_line2": "Паспорт покупателя",
+    "buyer_details_line3": "Адрес покупателя",
+    "buyer_details_line4": "Паспорт покупателя",
     "seller_details_line1": "Данные продавца",
     "seller_details_line2": "Паспорт продавца",
+    "seller_details_line3": "Адрес продавца",
+    "seller_details_line4": "Паспорт продавца",
     "vehicle_make_model": "Марка и модель",
     "vehicle_type": "Тип ТС",
     "vehicle_color": "Цвет кузова",
@@ -105,7 +113,9 @@ def _document_keyboard(
 
 def _deal_progress_text(session, *, missing_limit: int = 8) -> str:
     values = session.form.values if session.form is not None else {}
-    missing = [spec.label for spec in MANUAL_FIELDS if spec.key not in values]
+    missing = [
+        spec.label for spec in REQUIRED_MANUAL_FIELDS if spec.key not in values
+    ]
     confirmed = session.confirmed_documents
     documents = (
         ("paper_pts", "ПТС"),
@@ -118,7 +128,9 @@ def _deal_progress_text(session, *, missing_limit: int = 8) -> str:
         for marker, label in documents
     )
     rows = [
-        f"Заполнено полей: {len(values)} из {len(MANUAL_FIELDS)}.",
+        "Заполнено обязательных полей: "
+        f"{sum(spec.key in values for spec in REQUIRED_MANUAL_FIELDS)} "
+        f"из {len(REQUIRED_MANUAL_FIELDS)}.",
         "",
         "Документы:",
         document_lines,
@@ -623,7 +635,8 @@ def _detailed_review_texts(deal: DealDraft) -> tuple[str, ...]:
             f"VIN: {vehicle.vin}\n"
             f"Тип: {vehicle.vehicle_type}\n"
             f"Год выпуска: {vehicle.manufacture_year}\n"
-            f"Пробег: {vehicle.mileage_km} км\n"
+            f"Пробег: {vehicle.mileage_km if vehicle.mileage_km is not None else 'не указан'}"
+            f"{' км' if vehicle.mileage_km is not None else ''}\n"
             f"Мощность: {vehicle.engine_power_hp} л. с.\n"
             f"Рабочий объём: {vehicle.engine_displacement_cc} куб. см\n"
             f"Цвет: {vehicle.body_color}\n"
@@ -1852,7 +1865,7 @@ def build_dispatcher(
             sorted(session.confirmed_documents),
             sorted(
                 spec.key
-                for spec in MANUAL_FIELDS
+                for spec in REQUIRED_MANUAL_FIELDS
                 if spec.key not in session.form.values
             ),
         )
@@ -1948,7 +1961,9 @@ def build_dispatcher(
             return
         assert session.form is not None
         missing_keys = {
-            spec.key for spec in MANUAL_FIELDS if spec.key not in session.form.values
+            spec.key
+            for spec in REQUIRED_MANUAL_FIELDS
+            if spec.key not in session.form.values
         }
         if not missing_keys:
             try:
@@ -2009,7 +2024,9 @@ def build_dispatcher(
             await callback.answer("Эта кнопка устарела", show_alert=True)
             return
         missing_keys = {
-            spec.key for spec in MANUAL_FIELDS if spec.key not in session.form.values
+            spec.key
+            for spec in REQUIRED_MANUAL_FIELDS
+            if spec.key not in session.form.values
         }
         if not any(_section_for(key) == section for key in missing_keys):
             await callback.answer("В этом разделе всё уже заполнено", show_alert=True)
@@ -2150,7 +2167,7 @@ def build_dispatcher(
         if state_data.get("selective_manual") is True:
             missing_keys = {
                 spec.key
-                for spec in MANUAL_FIELDS
+                for spec in REQUIRED_MANUAL_FIELDS
                 if spec.key not in session.form.values
             }
             if missing_keys:
@@ -2232,9 +2249,12 @@ def build_dispatcher(
             await state.update_data(
                 field_key=next_field.key, revision=session.revision
             )
-            completed = len(session.form.values)
+            completed = sum(
+                spec.key in session.form.values for spec in REQUIRED_MANUAL_FIELDS
+            )
             await message.answer(
-                f"Сохранено · следующий вопрос {completed + 1} из {len(MANUAL_FIELDS)}.\n\n"
+                "Сохранено · следующий вопрос "
+                f"{completed + 1} из {len(REQUIRED_MANUAL_FIELDS)}.\n\n"
                 f"{next_field.prompt}"
             )
             return

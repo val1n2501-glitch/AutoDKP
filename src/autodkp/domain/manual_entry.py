@@ -106,6 +106,7 @@ class ManualFieldSpec:
     label: str
     prompt: str
     parser: Parser = _required_text
+    required: bool = True
 
 
 MANUAL_FIELDS: tuple[ManualFieldSpec, ...] = (
@@ -173,7 +174,11 @@ MANUAL_FIELDS: tuple[ManualFieldSpec, ...] = (
         "vehicle.manufacture_year", "Год выпуска", "Введите год выпуска.", _manufacture_year
     ),
     ManualFieldSpec(
-        "vehicle.mileage_km", "Пробег, км", "Введите пробег в километрах.", _nonnegative_integer
+        "vehicle.mileage_km",
+        "Пробег, км",
+        "Введите пробег в километрах.",
+        _nonnegative_integer,
+        required=False,
     ),
     ManualFieldSpec(
         "vehicle.engine_power_hp",
@@ -209,6 +214,7 @@ MANUAL_FIELDS: tuple[ManualFieldSpec, ...] = (
 
 
 FIELD_BY_KEY = {item.key: item for item in MANUAL_FIELDS}
+REQUIRED_MANUAL_FIELDS = tuple(item for item in MANUAL_FIELDS if item.required)
 
 
 @dataclass(slots=True)
@@ -216,7 +222,10 @@ class ManualDealForm:
     values: dict[str, object] = field(default_factory=dict)
 
     def next_missing(self) -> ManualFieldSpec | None:
-        return next((item for item in MANUAL_FIELDS if item.key not in self.values), None)
+        return next(
+            (item for item in REQUIRED_MANUAL_FIELDS if item.key not in self.values),
+            None,
+        )
 
     def submit(self, key: str, raw_value: str) -> object:
         try:
@@ -240,7 +249,11 @@ class ManualDealForm:
         return parsed
 
     def build_deal(self) -> DealDraft:
-        missing = [item.label for item in MANUAL_FIELDS if item.key not in self.values]
+        missing = [
+            item.label
+            for item in REQUIRED_MANUAL_FIELDS
+            if item.key not in self.values
+        ]
         if missing:
             raise ManualEntryError(f"Остались незаполненные поля: {len(missing)}.")
 
@@ -267,7 +280,7 @@ class ManualDealForm:
                     vin=self.values["vehicle.vin"],
                     vehicle_type=self.values["vehicle.vehicle_type"],
                     manufacture_year=self.values["vehicle.manufacture_year"],
-                    mileage_km=self.values["vehicle.mileage_km"],
+                    mileage_km=self.values.get("vehicle.mileage_km"),
                     engine_power_hp=self.values["vehicle.engine_power_hp"],
                     engine_displacement_cc=self.values["vehicle.engine_displacement_cc"],
                     body_color=self.values["vehicle.body_color"],

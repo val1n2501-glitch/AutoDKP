@@ -32,11 +32,19 @@ def _format_date(value: date) -> str:
 
 def _format_party(person: Person) -> str:
     return (
-        f"{person.full_name}, {_format_date(person.birth_date)} года рождения, "
-        f"место рождения: {person.birth_place}, адрес места жительства: {person.address}\n"
+        f"{person.full_name}, {_format_date(person.birth_date)} года рождения\n"
+        f"место рождения: {person.birth_place}\n"
+        f"адрес места жительства: {person.address}\n"
         f"паспорт: серия {person.passport_series} № {person.passport_number}, "
         f"выдан {person.passport_issued_by} {_format_date(person.passport_issue_date)}"
     )
+
+
+def _compact_identifier(value: str | None) -> str | None:
+    if value is None:
+        return None
+    compact = "".join(value.split()).upper()
+    return compact or None
 
 
 def _required_render_value(field_name: str, value: str | None) -> str:
@@ -128,20 +136,30 @@ class PdfRenderer:
             "agreement_date": _format_date(deal.agreement_date),
             "buyer_details_line1": buyer_lines[0],
             "buyer_details_line2": buyer_lines[1],
+            "buyer_details_line3": buyer_lines[2],
+            "buyer_details_line4": buyer_lines[3],
             "seller_details_line1": seller_lines[0],
             "seller_details_line2": seller_lines[1],
+            "seller_details_line3": seller_lines[2],
+            "seller_details_line4": seller_lines[3],
             "vehicle_make_model": vehicle.make_model,
-            "vehicle_vin": _required_render_value("vehicle.vin", vehicle.vin),
+            "vehicle_vin": _required_render_value(
+                "vehicle.vin", _compact_identifier(vehicle.vin)
+            ),
             "vehicle_type": vehicle.vehicle_type,
             "vehicle_year": str(vehicle.manufacture_year),
-            "vehicle_mileage": str(vehicle.mileage_km),
+            "vehicle_mileage": (
+                "" if vehicle.mileage_km is None else str(vehicle.mileage_km)
+            ),
             "vehicle_power": format(vehicle.engine_power_hp, "f"),
             "vehicle_displacement": str(vehicle.engine_displacement_cc),
             "vehicle_color": vehicle.body_color,
             "engine_model": _required_render_value("vehicle.engine_model", vehicle.engine_model),
             "engine_number": _required_render_value("vehicle.engine_number", vehicle.engine_number),
             "chassis_number": _required_render_value("vehicle.chassis_number", vehicle.chassis_number),
-            "body_number": _required_render_value("vehicle.body_number", vehicle.body_number),
+            "body_number": _required_render_value(
+                "vehicle.body_number", _compact_identifier(vehicle.body_number)
+            ),
             "pts_series_number": vehicle.pts.series_number,
             "pts_issued_by": vehicle.pts.issued_by,
             "pts_issue_date": _format_date(vehicle.pts.issue_date),

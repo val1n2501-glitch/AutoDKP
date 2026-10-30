@@ -81,7 +81,7 @@ class Vehicle(BaseModel):
     vin: str | None = None
     vehicle_type: str
     manufacture_year: int = Field(ge=1900, le=2100)
-    mileage_km: int = Field(ge=0)
+    mileage_km: int | None = Field(default=None, ge=0)
     engine_power_hp: Decimal = Field(ge=0)
     engine_displacement_cc: int = Field(ge=0)
     body_color: str
@@ -102,6 +102,14 @@ class Vehicle(BaseModel):
         if not normalized:
             return None
         return normalized
+
+    @field_validator("body_number")
+    @classmethod
+    def normalize_body_number(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = "".join(value.split()).upper()
+        return normalized or None
 
 
 class DealDraft(BaseModel):

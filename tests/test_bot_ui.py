@@ -23,7 +23,7 @@ from autodkp.bot.app import (
 )
 from autodkp.config import Settings
 from autodkp.domain.demo import make_demo_deal
-from autodkp.domain.manual_entry import MANUAL_FIELDS
+from autodkp.domain.manual_entry import MANUAL_FIELDS, REQUIRED_MANUAL_FIELDS
 from autodkp.domain.models import DocumentKind
 from autodkp.storage.session_store import InMemoryDealStore
 from datetime import timedelta
@@ -58,7 +58,11 @@ def test_document_picker_marks_confirmed_documents_and_progress_explains_pdf() -
     store = InMemoryDealStore(timedelta(minutes=60))
     session = store.create(101)
     progress = _deal_progress_text(session)
-    assert f"Заполнено полей: 0 из {len(MANUAL_FIELDS)}" in progress
+    assert (
+        "Заполнено обязательных полей: "
+        f"0 из {len(REQUIRED_MANUAL_FIELDS)}" in progress
+    )
+    assert "Пробег, км" not in progress
     assert "PDF пока недоступен" in progress
 
 

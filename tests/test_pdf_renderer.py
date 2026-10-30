@@ -50,6 +50,37 @@ def test_demo_pdf_preserves_signature_regions(tmp_path: Path) -> None:
         assert deal.vehicle.vin in text
 
 
+def test_party_details_fill_four_lines_and_optional_mileage_stays_blank(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "four-party-lines.pdf"
+    deal = make_demo_deal()
+    deal.vehicle.mileage_km = None
+    deal.vehicle.body_number = "XW7 BF4 FK90 S123456"
+    renderer = PdfRenderer(TEMPLATE, LAYOUT, FONT)
+    renderer.render(deal, output)
+    layout = load_layout(LAYOUT)
+    fields = {field.name: field for field in layout.fields}
+
+    with pymupdf.open(output) as document:
+        page = document[0]
+        for prefix in ("buyer", "seller"):
+            values = [
+                page.get_textbox(
+                    pymupdf.Rect(fields[f"{prefix}_details_line{index}"].rect)
+                ).strip()
+                for index in range(1, 5)
+            ]
+            assert all(values)
+        assert not page.get_textbox(
+            pymupdf.Rect(fields["vehicle_mileage"].rect)
+        ).strip()
+        body_number = page.get_textbox(
+            pymupdf.Rect(fields["body_number"].rect)
+        ).replace(" ", "")
+        assert "XW7BF4FK90S123456" in body_number
+
+
 def test_missing_vehicle_identifier_is_not_invented(tmp_path: Path) -> None:
     output = tmp_path / "missing-vin.pdf"
     deal = make_demo_deal()
